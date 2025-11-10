@@ -12,6 +12,12 @@ jobs:
       image: ubuntu:25.04
       options: --init
     steps:
+      - name: Install prerequisites (wget, tar)
+        run: |
+          set -euo pipefail
+          apt-get update
+          sudo apt-get install -y wget ca-certificates tar
+
       - name: Print OS information
         run: |
           echo "=== /etc/os-release ==="
