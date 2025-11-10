@@ -1,0 +1,79 @@
+name: CI — Ubuntu 25 (container)
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+
+jobs:
+  build:
+    name: Build & Test on Ubuntu 25 (container)
+    runs-on: ubuntu-24.04
+    strategy:
+      matrix:
+        compiler: [gcc, clang]
+        build_type: [Debug, Release]
+    container:
+      image: ubuntu:25.04
+      options: --init
+    env:
+      COMPILER: ${{ matrix.compiler }}
+    steps:
+      - name: Show container OS
+        run: |
+          echo "Host runner: $RUNNER_OS"
+          cat /etc/os-release || true
+          lsb_release -a || true
+
+      - uses: actions/checkout@v4
+
+      - name: Restore ccache
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.ccache
+          key: ccache-${{ runner.os }}-${{ matrix.compiler }}-${{ hashFiles('**/CMakeLists.txt') }}
+          restore-keys: ccache-${{ runner.os }}-${{ matrix.compiler }}-
+
+      - name: Install system dependencies
+        run: |
+          apt-get update
+          DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+            build-essential cmake ninja-build ccache pkg-config git ca-certificates \
+            lsb-release
+          # install clang only when requested (clang on Ubuntu 25 should be available as 'clang')
+          if [ "$COMPILER" = "clang" ]; then
+            apt-get install -y clang
+          fi
+
+      - name: Configure compiler environment
+        run: |
+          if [ "$COMPILER" = "clang" ]; then
+            echo "CC=clang" >> $GITHUB_ENV
+            echo "CXX=clang++" >> $GITHUB_ENV
+          else
+            echo "CC=gcc" >> $GITHUB_ENV
+            echo "CXX=g++" >> $GITHUB_ENV
+          fi
+          # Set ccache max size
+          ccache -M 5G || true
+
+      - name: Configure (CMake)
+        run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=${{ matrix.build_type }}
+
+      - name: Build
+        run: cmake --build build -- -j $(nproc)
+
+      - name: Run tests
+        run: |
+          if [ -f build/CTestTestfile.cmake ]; then
+            ctest --test-dir build --output-on-failure
+          else
+            echo "No CTest tests found."
+          fi
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-${{ matrix.compiler }}-${{ matrix.build_type }}
+          path: build/
